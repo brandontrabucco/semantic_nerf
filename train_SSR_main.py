@@ -5,7 +5,7 @@ import argparse
 from SSR.datasets.replica import replica_datasets
 from SSR.datasets.scannet import scannet_datasets
 from SSR.datasets.replica_nyu import replica_nyu_cnn_datasets
-from SSR.datasets.scannet import scannet_datasets
+from SSR.datasets.thor import thor_datasets
 
 from SSR.training import trainer
 
@@ -18,7 +18,7 @@ def train():
     #                     help='config file name.')
     parser.add_argument('--config_file', type=str, default="/home/shuaifeng/Documents/PhD_Research/CodeRelease/SemanticSceneRepresentations/SSR/configs/SSR_room0_config_test.yaml", 
                     help='config file name.')
-    parser.add_argument('--dataset_type', type=str, default="replica", choices= ["replica", "replica_nyu_cnn", "scannet"], 
+    parser.add_argument('--dataset_type', type=str, default="replica", choices= ["replica", "replica_nyu_cnn", "scannet", "thor"],
                         help='the dataset to be used,')
 
     ### working mode and specific options
@@ -156,6 +156,26 @@ def train():
 
         ssr_trainer.set_params_replica()  # we still call params of replica here since the image sources are from Replica still
         ssr_trainer.prepare_data_replica_nyu_cnn(replica_nyu_cnn_data_loader)
+
+    elif args.dataset_type == "thor":
+        print("----- THOR Dataset with Ground Truth Segmentation -----")
+
+        total_num = 200
+
+        train_ids = list(range(10, total_num))
+        test_ids = list(range(0, 10))
+
+        #add ids to config for later saving.
+        config["experiment"]["train_ids"] = train_ids
+        config["experiment"]["test_ids"] = test_ids
+
+        thor_data_loader = thor_datasets.THORDatasetCache(data_dir=config["experiment"]["dataset_dir"],
+                                                          train_ids=train_ids, test_ids=test_ids,
+                                                          img_h=config["experiment"]["height"],
+                                                          img_w=config["experiment"]["width"])
+
+        ssr_trainer.set_params_thor()
+        ssr_trainer.prepare_data_thor(thor_data_loader)
 
     elif args.dataset_type == "scannet":
         print("----- ScanNet Dataset with NYUv2-40 Conventions-----")

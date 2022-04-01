@@ -19,6 +19,7 @@ from SSR.visualisation.tensorboard_vis import TFVisualizer
 from SSR.utils import image_utils
 from tqdm import tqdm
 from imgviz import label_colormap, depth2rgb
+from collections import OrderedDict
 
 
 def select_gpus(gpus):
@@ -80,6 +81,35 @@ class SSRTrainer(object):
 
         self.save_config()
 
+    def set_params_thor(self):
+        self.H = self.config["experiment"]["height"]
+        self.W = self.config["experiment"]["width"]
+
+        self.n_pix = self.H * self.W
+        self.aspect_ratio = self.W/self.H
+
+        self.hfov = 90
+        # the pin-hole camera has the same value for fx and fy
+        self.fx = self.W / 2.0 / math.tan(math.radians(self.hfov / 2.0))
+        # self.fy = self.H / 2.0 / math.tan(math.radians(self.yhov / 2.0))
+        self.fy = self.fx
+        self.cx = (self.W - 1.0) / 2.0
+        self.cy = (self.H - 1.0) / 2.0
+        self.near, self.far = self.config["render"]["depth_range"]
+        self.c2w_staticcam = None
+
+        # use scaled size for test and visualisation purpose
+        self.test_viz_factor = int(self.config["render"]["test_viz_factor"])
+        self.H_scaled = self.H//self.test_viz_factor
+        self.W_scaled = self.W//self.test_viz_factor
+        self.fx_scaled = self.W_scaled / 2.0 / math.tan(math.radians(self.hfov / 2.0))
+        # self.fy_scaled = self.H_scaled / 2.0 / math.tan(math.radians(self.yhov / 2.0))
+        self.fy_scaled = self.fx_scaled
+        self.cx_scaled = (self.W_scaled - 1.0) / 2.0
+        self.cy_scaled = (self.H_scaled - 1.0) / 2.0
+
+        self.save_config()
+
 
     def set_params_scannet(self, data):
         self.H = self.config["experiment"]["height"]
@@ -108,6 +138,7 @@ class SSRTrainer(object):
 
     def set_params(self):
         self.enable_semantic = self.config["experiment"]["enable_semantic"]
+        self.enable_depth = self.config["experiment"]["enable_depth"]
 
         #render options
         self.n_rays = eval(self.config["render"]["N_rays"])  if isinstance(self.config["render"]["N_rays"], str) \
@@ -138,6 +169,183 @@ class SSRTrainer(object):
 
         # logging
         self.save_dir = self.config["experiment"]["save_dir"]
+
+    def prepare_data_thor(self, data, gpu=True):
+
+        # objects that respond the pickup action
+        PICKABLE_TO_COLOR = OrderedDict([
+            ('Candle', (233, 102, 178)),
+            ('SoapBottle', (168, 222, 137)),
+            ('ToiletPaper', (162, 204, 152)),
+            ('SoapBar', (43, 97, 155)),
+            ('SprayBottle', (89, 126, 121)),
+            ('TissueBox', (98, 43, 249)),
+            ('DishSponge', (166, 58, 136)),
+            ('PaperTowelRoll', (144, 173, 28)),
+            ('Book', (43, 31, 148)),
+            ('CreditCard', (56, 235, 12)),
+            ('Dumbbell', (45, 57, 144)),
+            ('Pen', (239, 130, 152)),
+            ('Pencil', (177, 226, 23)),
+            ('CellPhone', (227, 98, 136)),
+            ('Laptop', (20, 107, 222)),
+            ('CD', (65, 112, 172)),
+            ('AlarmClock', (184, 20, 170)),
+            ('Statue', (243, 75, 41)),
+            ('Mug', (8, 94, 186)),
+            ('Bowl', (209, 182, 193)),
+            ('TableTopDecor', (126, 204, 158)),
+            ('Box', (60, 252, 230)),
+            ('RemoteControl', (187, 19, 208)),
+            ('Vase', (83, 152, 69)),
+            ('Watch', (242, 6, 88)),
+            ('Newspaper', (19, 196, 2)),
+            ('Plate', (188, 154, 128)),
+            ('WateringCan', (147, 67, 249)),
+            ('Fork', (54, 200, 25)),
+            ('PepperShaker', (5, 204, 214)),
+            ('Spoon', (235, 57, 90)),
+            ('ButterKnife', (135, 147, 55)),
+            ('Pot', (132, 237, 87)),
+            ('SaltShaker', (36, 222, 26)),
+            ('Cup', (35, 71, 130)),
+            ('Spatula', (30, 98, 242)),
+            ('WineBottle', (53, 130, 252)),
+            ('Knife', (211, 157, 122)),
+            ('Pan', (246, 212, 161)),
+            ('Ladle', (174, 98, 216)),
+            ('Egg', (240, 75, 163)),
+            ('Kettle', (7, 83, 48)),
+            ('Bottle', (64, 80, 115))])
+
+        # objects that respond to the open action
+        OPENABLE_TO_COLOR = OrderedDict([
+            ('Drawer', (155, 30, 210)),
+            ('Toilet', (21, 27, 163)),
+            ('ShowerCurtain', (60, 12, 39)),
+            ('ShowerDoor', (36, 253, 61)),
+            ('Cabinet', (210, 149, 89)),
+            ('Blinds', (214, 223, 197)),
+            ('LaundryHamper', (35, 109, 26)),
+            ('Safe', (198, 238, 160)),
+            ('Microwave', (54, 96, 202)),
+            ('Fridge', (91, 156, 207))])
+
+        # mapping from classes to colors for segmentation
+        CLASS_TO_COLOR = OrderedDict(
+            [("OccupiedSpace", (243, 246, 208))]
+            + list(PICKABLE_TO_COLOR.items())
+            + list(OPENABLE_TO_COLOR.items()))
+
+        # number of semantic segmentation classes we process
+        NUM_CLASSES = len(CLASS_TO_COLOR)
+
+        self.ignore_label = NUM_CLASSES
+
+        # shift numpy data to torch
+        train_samples = data.train_samples
+        test_samples = data.test_samples
+
+        self.train_ids = data.train_ids
+        self.test_ids = data.test_ids
+        self.mask_ids = data.mask_ids
+
+        self.num_train = data.train_num
+        self.num_test = data.test_num
+
+        # preprocess semantic info
+        self.semantic_classes = torch.from_numpy(data.semantic_classes)
+        self.num_semantic_class = self.semantic_classes.shape[0]  # number of semantic classes, including void class=0
+        self.num_valid_semantic_class = self.num_semantic_class  # exclude void class
+        assert self.num_semantic_class==data.num_semantic_class
+
+        total_num_classes = NUM_CLASSES
+        # assert self.num_valid_semantic_class == np.sum(np.unique(instance_id_to_semantic_label_id) >=0 )
+
+        colour_map_np = label_colormap(total_num_classes)[data.semantic_classes] # select the existing class from total colour map
+        self.colour_map = torch.from_numpy(colour_map_np)
+        self.valid_colour_map = torch.from_numpy(colour_map_np) # exclude the first colour map to colourise rendered segmentation without void index
+
+        # plot semantic label legend
+        # class_name_string = ["voild"] + [x["name"] for x in annotations["classes"] if x["id"] in np.unique(data.semantic)]
+        class_name_string = list(CLASS_TO_COLOR.keys())
+        legend_img_arr = image_utils.plot_semantic_legend(data.semantic_classes, class_name_string,
+        colormap=label_colormap(total_num_classes), save_path=self.save_dir)
+        # total_num_classes +1 to include void class
+
+        # remap different semantic classes to continuous integers from 0 to num_class-1
+        self.semantic_classes_remap = torch.from_numpy(np.arange(self.num_semantic_class))
+
+        #####training data#####
+        # rgb
+        self.train_image = torch.from_numpy(train_samples["image"])
+        self.train_image_scaled = F.interpolate(self.train_image.permute(0,3,1,2,),
+                                    scale_factor=1/self.config["render"]["test_viz_factor"],
+                                    mode='bilinear').permute(0,2,3,1)
+
+        # semantic
+        self.train_semantic = torch.from_numpy(train_samples["semantic_remap"])
+        self.viz_train_semantic = np.stack([colour_map_np[sem] for sem in self.train_semantic], axis=0) # [num_test, H, W, 3]
+
+        self.train_semantic_clean = torch.from_numpy(train_samples["semantic_remap_clean"])
+        self.viz_train_semantic_clean = np.stack([colour_map_np[sem] for sem in self.train_semantic_clean], axis=0) # [num_test, H, W, 3]
+
+        # process the clean label for evaluation purpose
+        self.train_semantic_clean_scaled = F.interpolate(torch.unsqueeze(self.train_semantic_clean, dim=1).float(),
+                                                            scale_factor=1/self.config["render"]["test_viz_factor"],
+                                                            mode='nearest').squeeze(1)
+        self.train_semantic_clean_scaled = self.train_semantic_clean_scaled.cpu().numpy()
+        # pose
+        self.train_Ts = torch.from_numpy(train_samples["T_wc"]).float()
+
+
+        #####test data#####
+        # rgb
+        self.test_image = torch.from_numpy(test_samples["image"])  # [num_test, H, W, 3]
+        # scale the test image for evaluation purpose
+        self.test_image_scaled = F.interpolate(self.test_image.permute(0,3,1,2,),
+                                            scale_factor=1/self.config["render"]["test_viz_factor"],
+                                            mode='bilinear').permute(0,2,3,1)
+
+        # semantic
+        self.test_semantic = torch.from_numpy(test_samples["semantic_remap"])  # [num_test, H, W]
+
+        self.viz_test_semantic = np.stack([colour_map_np[sem] for sem in self.test_semantic], axis=0) # [num_test, H, W, 3]
+
+        # we only add noise to training images, therefore test images are kept intact. No need for test_remap_clean
+        # process the clean label for evaluation purpose
+        self.test_semantic_scaled = F.interpolate(torch.unsqueeze(self.test_semantic, dim=1).float(),
+                                                    scale_factor=1/self.config["render"]["test_viz_factor"],
+                                                    mode='nearest').squeeze(1)
+        self.test_semantic_scaled = self.test_semantic_scaled.cpu().numpy() # shift void class from value 0 to -1, to match self.ignore_label
+        # pose
+        self.test_Ts = torch.from_numpy(test_samples["T_wc"]).float()  # [num_test, 4, 4]
+
+        if gpu is True:
+            self.train_image = self.train_image.cuda()
+            self.train_image_scaled = self.train_image_scaled.cuda()
+            self.train_semantic = self.train_semantic.cuda()
+
+            self.test_image = self.test_image.cuda()
+            self.test_image_scaled = self.test_image_scaled.cuda()
+            self.test_semantic = self.test_semantic.cuda()
+            self.colour_map = self.colour_map.cuda()
+            self.valid_colour_map = self.valid_colour_map.cuda()
+
+        # set the data sampling paras which need the number of training images
+        if self.no_batching is False: # False means we need to sample from all rays instead of rays from one random image
+            self.i_batch = 0
+            self.rand_idx = torch.randperm(self.num_train*self.H*self.W)
+
+        # add datasets to tfboard for comparison to rendered images
+        self.tfb_viz.tb_writer.add_image('Train/legend', np.expand_dims(legend_img_arr, axis=0), 0, dataformats='NHWC')
+        self.tfb_viz.tb_writer.add_image('Train/rgb_GT', train_samples["image"], 0, dataformats='NHWC')
+        self.tfb_viz.tb_writer.add_image('Train/vis_sem_label_GT', self.viz_train_semantic, 0, dataformats='NHWC')
+        self.tfb_viz.tb_writer.add_image('Train/vis_sem_label_GT_clean', self.viz_train_semantic_clean, 0, dataformats='NHWC')
+
+        self.tfb_viz.tb_writer.add_image('Test/legend', np.expand_dims(legend_img_arr, axis=0), 0, dataformats='NHWC')
+        self.tfb_viz.tb_writer.add_image('Test/rgb_GT', test_samples["image"], 0, dataformats='NHWC')
+        self.tfb_viz.tb_writer.add_image('Test/vis_sem_label_GT', self.viz_test_semantic, 0, dataformats='NHWC')
 
     def prepare_data_replica(self, data, gpu=True):
         self.ignore_label = -1
@@ -626,14 +834,16 @@ class SSRTrainer(object):
 
         if mode == "train":
             image = self.train_image
-            if self.enable_semantic:
+            if self.enable_depth:
                 depth = self.train_depth
+            if self.enable_semantic:
                 semantic = self.train_semantic
             sample_num = self.num_train
         elif mode == "test":
             image = self.test_image
-            if self.enable_semantic:
+            if self.enable_depth:
                 depth = self.test_depth
+            if self.enable_semantic:
                 semantic = self.test_semantic
             sample_num = self.num_test
         elif mode == "vis":
@@ -650,8 +860,9 @@ class SSRTrainer(object):
 
             flat_sampled_rays = sampled_rays.reshape([-1, ray_dim]).float()
             gt_image = image.reshape(sample_num, -1, 3)[index_batch, index_hw, :].reshape(-1, 3)
-            if self.enable_semantic:
+            if self.enable_depth:
                 gt_depth = depth.reshape(sample_num, -1)[index_batch, index_hw].reshape(-1)
+            if self.enable_semantic:
                 sematic_available_flag = self.mask_ids[index_batch] # semantic available if mask_id is 1 (train with rgb loss and semantic loss) else 0 (train with rgb loss only)
                 gt_semantic = semantic.reshape(sample_num, -1)[index_batch, index_hw].reshape(-1)
                 gt_semantic = gt_semantic.cuda()  
@@ -662,8 +873,9 @@ class SSRTrainer(object):
             flat_rays = rays.reshape([-1, ray_dim]).float()
             flat_sampled_rays = flat_rays[index_hw, :]
             gt_image = image.reshape(-1, 3)[index_hw, :]
-            if self.enable_semantic:
+            if self.enable_depth:
                 gt_depth = depth.reshape(-1)[index_hw]
+            if self.enable_semantic:
                 gt_semantic = semantic.reshape(-1)[index_hw]
                 gt_semantic = gt_semantic.cuda()  
 
@@ -675,14 +887,21 @@ class SSRTrainer(object):
 
         sampled_rays = flat_sampled_rays
         sampled_gt_rgb = gt_image
-        if self.enable_semantic:
+
+        return_values = [sampled_rays, sampled_gt_rgb]
+
+        if self.enable_depth:
             sampled_gt_depth = gt_depth
 
+            return_values.append(sampled_gt_depth)
+
+        if self.enable_semantic:
             sampled_gt_semantic = gt_semantic.long()  # required long type for nn.NLL or nn.crossentropy
 
-            return sampled_rays, sampled_gt_rgb, sampled_gt_depth, sampled_gt_semantic, sematic_available_flag
-        else:
-            return sampled_rays, sampled_gt_rgb
+            return_values.append(sampled_gt_semantic)
+            return_values.append(sematic_available_flag)
+
+        return return_values
 
     def render_rays(self, flat_rays):
         """
@@ -850,7 +1069,9 @@ class SSRTrainer(object):
 
         dataset_type = self.config["experiment"]["dataset_type"]
         if dataset_type == "replica" or dataset_type == "replica_nyu_cnn" or dataset_type == "scannet":
-            crossentropy_loss = lambda logit, label: CrossEntropyLoss(logit, label-1)  # replica has void class of ID==0, label-1 to shift void class to -1 
+            crossentropy_loss = lambda logit, label: CrossEntropyLoss(logit, label-1)  # replica has void class of ID==0, label-1 to shift void class to -1
+        if dataset_type == "thor":
+            crossentropy_loss = lambda logit, label: CrossEntropyLoss(logit, label)  # replica has void class of ID==0, label-1 to shift void class to -1
         else:
             assert False
 
@@ -862,8 +1083,12 @@ class SSRTrainer(object):
 
         # sample rays to query and optimise
         sampled_data = self.sample_data(global_step, self.rays, self.H, self.W, no_batching=True, mode="train")
-        if self.enable_semantic:
+        if self.enable_semantic and self.enable_depth:
             sampled_rays, sampled_gt_rgb, sampled_gt_depth, sampled_gt_semantic, sematic_available = sampled_data
+        elif self.enable_semantic:
+            sampled_rays, sampled_gt_rgb, sampled_gt_semantic, sematic_available = sampled_data
+        elif self.enable_depth:
+            sampled_rays, sampled_gt_rgb, sampled_gt_depth = sampled_data
         else:
             sampled_rays, sampled_gt_rgb = sampled_data
                     
@@ -896,6 +1121,8 @@ class SSRTrainer(object):
         else:
             semantic_loss_coarse = torch.tensor(0)
 
+        if torch.isnan(semantic_loss_coarse).any():
+            import ipdb; ipdb.set_trace()
 
         with torch.no_grad():
             psnr_coarse = mse2psnr(img_loss_coarse)
@@ -978,6 +1205,7 @@ class SSRTrainer(object):
             print(' {} train images'.format(self.num_train))
             with torch.no_grad():
                 # rgbs, disps, deps, vis_deps, sems, vis_sems
+                print(self.rays_vis.shape)
                 rgbs, disps, deps, vis_deps, sems, vis_sems, sem_uncers, vis_sem_uncers = self.render_path(self.rays_vis, save_dir=trainsavedir)
                 #  numpy array of shape [B,H,W,C] or [B,H,W]
             print('Saved training set')
@@ -1009,13 +1237,13 @@ class SSRTrainer(object):
             self.tfb_viz.tb_writer.add_image('Train/depth', vis_deps, global_step, dataformats='NHWC')
             self.tfb_viz.tb_writer.add_image('Train/disps', np.expand_dims(disps,-1), global_step, dataformats='NHWC')
 
+            if self.enable_depth:
 
-            # evaluate depths
-            depth_metrics_dic = calculate_depth_metrics(depth_trgt=self.train_depth_scaled, depth_pred=deps)
-            self.tfb_viz.vis_scalars(global_step,
-                    list(depth_metrics_dic.values()),
-                    ["Train/Metric/"+k for k in list(depth_metrics_dic.keys())])
-
+                # evaluate depths
+                depth_metrics_dic = calculate_depth_metrics(depth_trgt=self.train_depth_scaled, depth_pred=deps)
+                self.tfb_viz.vis_scalars(global_step,
+                        list(depth_metrics_dic.values()),
+                        ["Train/Metric/"+k for k in list(depth_metrics_dic.keys())])
 
             if self.enable_semantic:
                 self.tfb_viz.tb_writer.add_image('Train/vis_sem_label', vis_sems, global_step, dataformats='NHWC')
@@ -1090,11 +1318,14 @@ class SSRTrainer(object):
             self.tfb_viz.tb_writer.add_image('Test/depth', vis_deps, global_step, dataformats='NHWC')
             self.tfb_viz.tb_writer.add_image('Test/disps', np.expand_dims(disps,-1), global_step, dataformats='NHWC')
 
-            # evaluate depths
-            depth_metrics_dic = calculate_depth_metrics(depth_trgt=self.test_depth_scaled, depth_pred=deps)
-            self.tfb_viz.vis_scalars(global_step,
-                    list(depth_metrics_dic.values()),
-                    ["Test/Metric/"+k for k in list(depth_metrics_dic.keys())])
+            if self.enable_depth:
+
+                # evaluate depths
+                depth_metrics_dic = calculate_depth_metrics(depth_trgt=self.test_depth_scaled, depth_pred=deps)
+                self.tfb_viz.vis_scalars(global_step,
+                        list(depth_metrics_dic.values()),
+                        ["Test/Metric/"+k for k in list(depth_metrics_dic.keys())])
+
             if self.enable_semantic:
                 self.tfb_viz.tb_writer.add_image('Test/vis_sem_label', vis_sems, global_step, dataformats='NHWC')
                 self.tfb_viz.tb_writer.add_image('Test/vis_sem_uncertainty', vis_sem_uncers, global_step, dataformats='NHWC')
