@@ -1,7 +1,7 @@
 
 experiment:
-  save_dir: "./SSR/datasets/thor/logs"
-  dataset_dir: "./SSR/datasets/thor"
+  save_dir: "./SSR/datasets/thor/logs-unshuffle"
+  dataset_dir: "./SSR/datasets/thor/thor-unshuffle.pkl"
   convention: "opengl"
   width: 224
   height: 224
@@ -37,7 +37,7 @@ render:
 train:
     lrate: 5e-4
     lrate_decay: 250e3
-    N_iters: 200000
+    N_iters: 50000
     wgt_sem: 4e-2
 
 
@@ -45,6 +45,6 @@ train:
 logging: # logging/saving options
     step_log_print: 50  # 'frequency of console print'
     step_log_tfb: 500
-    step_save_ckpt: 20000
+    step_save_ckpt: 10000
     step_val: 5000 # frequency of rendering on unseen data
     step_vis_train: 5000

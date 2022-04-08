@@ -139,6 +139,7 @@ class SSRTrainer(object):
     def set_params(self):
         self.enable_semantic = self.config["experiment"]["enable_semantic"]
         self.enable_depth = self.config["experiment"]["enable_depth"]
+        self.return_top_p_occupied_voxels = 0.0
 
         #render options
         self.n_rays = eval(self.config["render"]["N_rays"])  if isinstance(self.config["render"]["N_rays"], str) \
@@ -923,7 +924,9 @@ class SSRTrainer(object):
 
         for k in all_ret:
             k_sh = list(ray_shape[:-1]) + list(all_ret[k].shape[1:])
-            all_ret[k] = torch.reshape(all_ret[k], k_sh)
+
+            if "occupied_pts" not in k:
+                all_ret[k] = torch.reshape(all_ret[k], k_sh)
 
         return all_ret
 
@@ -967,6 +970,18 @@ class SSRTrainer(object):
             raw2outputs(raw_coarse, z_vals, rays_d, raw_noise_std, self.white_bkgd, enable_semantic = self.enable_semantic,
             num_sem_class = self.num_valid_semantic_class, endpoint_feat = False)
 
+        if self.return_top_p_occupied_voxels > 0:
+
+            weights_coarse_indices = torch.argsort(weights_coarse, dim=1, descending=False)
+
+            sorted_weights_coarse = torch.gather(weights_coarse, 1, weights_coarse_indices)
+            sorted_pts_coarse_sampled = torch.gather(pts_coarse_sampled, 1, weights_coarse_indices
+                                                     .unsqueeze(2).expand(N_rays, self.N_samples, 3))
+
+            sorted_cumulative_weights_coarse = torch.cumsum(sorted_weights_coarse, dim=1)
+            occupied_indices_course = torch.nonzero(sorted_cumulative_weights_coarse >
+                                                    1.0 - self.return_top_p_occupied_voxels, as_tuple=True)
+            occupied_pts_course = sorted_pts_coarse_sampled[occupied_indices_course]
 
         if self.N_importance > 0:
             z_vals_mid = .5 * (z_vals[..., 1:] + z_vals[..., :-1])  # (N_rays, N_samples-1) interval mid points
@@ -987,6 +1002,19 @@ class SSRTrainer(object):
                 raw2outputs(raw_fine, z_vals, rays_d, raw_noise_std, self.white_bkgd, enable_semantic = self.enable_semantic,
                 num_sem_class = self.num_valid_semantic_class, endpoint_feat = self.endpoint_feat)
 
+            if self.return_top_p_occupied_voxels > 0:
+
+                weights_fine_indices = torch.argsort(weights_fine, dim=1, descending=False)
+
+                sorted_weights_fine = torch.gather(weights_fine, 1, weights_fine_indices)
+                sorted_pts_fine_sampled = torch.gather(pts_fine_sampled, 1, weights_fine_indices
+                                                       .unsqueeze(2).expand(N_rays, self.N_samples + self.N_importance, 3))
+
+                sorted_cumulative_weights_fine = torch.cumsum(sorted_weights_fine, dim=1)
+                occupied_indices_fine = torch.nonzero(sorted_cumulative_weights_fine >
+                                                      1.0 - self.return_top_p_occupied_voxels, as_tuple=True)
+                occupied_pts_fine = sorted_pts_fine_sampled[occupied_indices_fine]
+
         ret = {}
         ret['raw_coarse'] = raw_coarse
         ret['rgb_coarse'] = rgb_coarse
@@ -995,6 +1023,8 @@ class SSRTrainer(object):
         ret['depth_coarse'] = depth_coarse
         if self.enable_semantic:
             ret['sem_logits_coarse'] = sem_logits_coarse
+        if self.return_top_p_occupied_voxels > 0:
+            ret['occupied_pts_course'] = occupied_pts_course
 
         if self.N_importance > 0:
             ret['rgb_fine'] = rgb_fine
@@ -1003,6 +1033,8 @@ class SSRTrainer(object):
             ret['depth_fine'] = depth_fine
             if self.enable_semantic:
                 ret['sem_logits_fine'] = sem_logits_fine
+            if self.return_top_p_occupied_voxels > 0:
+                ret['occupied_pts_fine'] = occupied_pts_fine
             ret['z_std'] = torch.std(z_samples, dim=-1, unbiased=False)  # [N_rays]
             ret['raw_fine'] = raw_fine  # model's raw, unprocessed predictions.
             if self.endpoint_feat:
@@ -1205,7 +1237,6 @@ class SSRTrainer(object):
             print(' {} train images'.format(self.num_train))
             with torch.no_grad():
                 # rgbs, disps, deps, vis_deps, sems, vis_sems
-                print(self.rays_vis.shape)
                 rgbs, disps, deps, vis_deps, sems, vis_sems, sem_uncers, vis_sem_uncers = self.render_path(self.rays_vis, save_dir=trainsavedir)
                 #  numpy array of shape [B,H,W,C] or [B,H,W]
             print('Saved training set')

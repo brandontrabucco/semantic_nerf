@@ -12,17 +12,11 @@ class THORDatasetCache(Dataset):
 
     def __init__(self, data_dir, train_ids, test_ids, img_h=None, img_w=None):
 
-        with open(os.path.join(
-                data_dir, 'thor-walkthrough.pkl'), 'rb') as f:
+        with open(data_dir, 'rb') as f:
 
-            self.thor_walkthrough_data = pkl.load(f)
+            self.thor_data = pkl.load(f)
 
-        with open(os.path.join(
-                data_dir, 'thor-unshuffle.pkl'), 'rb') as f:
-
-            self.thor_unshuffle_data = pkl.load(f)
-
-        poses = self.thor_walkthrough_data['poses']
+        poses = self.thor_data['poses']
 
         # fix a mistake I made when generating the dataset
         poses = np.concatenate([poses[:, :, 1:], poses[:, :, :1]], axis=-1)
@@ -38,23 +32,21 @@ class THORDatasetCache(Dataset):
         self.img_h = img_h
         self.img_w = img_w
 
-        self.semantic_class_dir = os.path.join(data_dir, "semantic_class")
+        self.semantic_class_dir = None
         self.semantic_instance_dir = None
 
-        os.makedirs(self.semantic_class_dir, exist_ok=True)
-
         self.train_samples = {'image': [], 'depth': [],
-                          'semantic': [], 'T_wc': [],
-                          'instance': []}
+                              'semantic': [], 'T_wc': [],
+                              'instance': []}
 
         self.test_samples = {'image': [], 'depth': [],
-                          'semantic': [], 'T_wc': [],
-                          'instance': []}
+                             'semantic': [], 'T_wc': [],
+                             'instance': []}
 
         for idx in train_ids:
 
-            image = self.thor_walkthrough_data["images"][idx]
-            semantic = self.thor_walkthrough_data["segmentation"][idx, :, :, 0]
+            image = self.thor_data["images"][idx]
+            semantic = self.thor_data["segmentation"][idx, :, :, 0]
 
             if (self.img_h is not None and self.img_h != image.shape[0]) or \
                     (self.img_w is not None and self.img_w != image.shape[1]):
@@ -70,8 +62,8 @@ class THORDatasetCache(Dataset):
 
         for idx in test_ids:
 
-            image = self.thor_walkthrough_data["images"][idx]
-            semantic = self.thor_walkthrough_data["segmentation"][idx, :, :, 0]
+            image = self.thor_data["images"][idx]
+            semantic = self.thor_data["segmentation"][idx, :, :, 0]
 
             if (self.img_h is not None and self.img_h != image.shape[0]) or \
                     (self.img_w is not None and self.img_w != image.shape[1]):

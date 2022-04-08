@@ -17,6 +17,7 @@ def grid_within_bound(occ_range, extents, transform, grid_dim):
             transform=bounds_tranform,
             scale=scene_scale,
         )
+
         grid_pc = grid_pc.view(-1, 1, 3)
 
         return grid_pc, scene_scale

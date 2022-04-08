@@ -21,6 +21,9 @@ def train():
     parser.add_argument('--dataset_type', type=str, default="replica", choices= ["replica", "replica_nyu_cnn", "scannet", "thor"],
                         help='the dataset to be used,')
 
+    parser.add_argument('--save_dir', type=str, default=None)
+    parser.add_argument('--dataset_dir', type=str, default=None)
+
     ### working mode and specific options
 
     # sparse-views
@@ -160,10 +163,10 @@ def train():
     elif args.dataset_type == "thor":
         print("----- THOR Dataset with Ground Truth Segmentation -----")
 
-        total_num = 200
+        total_num = 199
 
-        train_ids = list(range(10, total_num))
-        test_ids = list(range(0, 10))
+        train_ids = list(range(4, total_num))
+        test_ids = list(range(0, 4))
 
         #add ids to config for later saving.
         config["experiment"]["train_ids"] = train_ids
