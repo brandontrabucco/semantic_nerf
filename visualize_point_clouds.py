@@ -3,6 +3,7 @@ import open3d
 import glob
 import os
 import numpy as np
+import pickle as pkl
 
 
 from imgviz import label_colormap
@@ -10,75 +11,75 @@ from collections import OrderedDict, defaultdict
 
 
 # objects that respond the pickup action
-PICKABLE_TO_COLOR = OrderedDict([
-    ('Candle', (233, 102, 178)),
-    ('SoapBottle', (168, 222, 137)),
-    ('ToiletPaper', (162, 204, 152)),
-    ('SoapBar', (43, 97, 155)),
-    ('SprayBottle', (89, 126, 121)),
-    ('TissueBox', (98, 43, 249)),
-    ('DishSponge', (166, 58, 136)),
-    ('PaperTowelRoll', (144, 173, 28)),
-    ('Book', (43, 31, 148)),
-    ('CreditCard', (56, 235, 12)),
-    ('Dumbbell', (45, 57, 144)),
-    ('Pen', (239, 130, 152)),
-    ('Pencil', (177, 226, 23)),
-    ('CellPhone', (227, 98, 136)),
-    ('Laptop', (20, 107, 222)),
-    ('CD', (65, 112, 172)),
-    ('AlarmClock', (184, 20, 170)),
-    ('Statue', (243, 75, 41)),
-    ('Mug', (8, 94, 186)),
-    ('Bowl', (209, 182, 193)),
-    ('TableTopDecor', (126, 204, 158)),
-    ('Box', (60, 252, 230)),
-    ('RemoteControl', (187, 19, 208)),
-    ('Vase', (83, 152, 69)),
-    ('Watch', (242, 6, 88)),
-    ('Newspaper', (19, 196, 2)),
-    ('Plate', (188, 154, 128)),
-    ('WateringCan', (147, 67, 249)),
-    ('Fork', (54, 200, 25)),
-    ('PepperShaker', (5, 204, 214)),
-    ('Spoon', (235, 57, 90)),
-    ('ButterKnife', (135, 147, 55)),
-    ('Pot', (132, 237, 87)),
-    ('SaltShaker', (36, 222, 26)),
-    ('Cup', (35, 71, 130)),
-    ('Spatula', (30, 98, 242)),
-    ('WineBottle', (53, 130, 252)),
-    ('Knife', (211, 157, 122)),
-    ('Pan', (246, 212, 161)),
-    ('Ladle', (174, 98, 216)),
-    ('Egg', (240, 75, 163)),
-    ('Kettle', (7, 83, 48)),
-    ('Bottle', (64, 80, 115))])
+PICKABLE_TO_RATIO = OrderedDict([
+    ('Candle', 0.2),
+    ('SoapBottle', 0.2),
+    ('ToiletPaper', 0.2),
+    ('SoapBar', 0.2),
+    ('SprayBottle', 0.2),
+    ('TissueBox', 0.2),
+    ('DishSponge', 0.2),
+    ('PaperTowelRoll', 0.2),
+    ('Book', 0.2),
+    ('CreditCard', 0.2),
+    ('Dumbbell', 0.2),
+    ('Pen', 0.2),
+    ('Pencil', 0.2),
+    ('CellPhone', 0.2),
+    ('Laptop', 0.2),
+    ('CD', 0.2),
+    ('AlarmClock', 0.2),
+    ('Statue', 0.2),
+    ('Mug', 0.2),
+    ('Bowl', 0.2),
+    ('TableTopDecor', 0.2),
+    ('Box', 0.2),
+    ('RemoteControl', 0.2),
+    ('Vase', 0.2),
+    ('Watch', 0.2),
+    ('Newspaper', 0.2),
+    ('Plate', 0.2),
+    ('WateringCan', 0.2),
+    ('Fork', 0.2),
+    ('PepperShaker', 0.2),
+    ('Spoon', 0.2),
+    ('ButterKnife', 0.2),
+    ('Pot', 0.2),
+    ('SaltShaker', 0.2),
+    ('Cup', 0.2),
+    ('Spatula', 0.2),
+    ('WineBottle', 0.2),
+    ('Knife', 0.2),
+    ('Pan', 0.2),
+    ('Ladle', 0.2),
+    ('Egg', 0.2),
+    ('Kettle', 0.2),
+    ('Bottle', 0.2)])
 
 
 # objects that respond to the open action
-OPENABLE_TO_COLOR = OrderedDict([
-    ('Drawer', (155, 30, 210)),
-    ('Toilet', (21, 27, 163)),
-    ('ShowerCurtain', (60, 12, 39)),
-    ('ShowerDoor', (36, 253, 61)),
-    ('Cabinet', (210, 149, 89)),
-    ('Blinds', (214, 223, 197)),
-    ('LaundryHamper', (35, 109, 26)),
-    ('Safe', (198, 238, 160)),
-    ('Microwave', (54, 96, 202)),
-    ('Fridge', (91, 156, 207))])
+OPENABLE_TO_RATIO = OrderedDict([
+    ('Drawer', 0.2),
+    ('Toilet', 0.2),
+    ('ShowerCurtain', 0.2),
+    ('ShowerDoor', 0.2),
+    ('Cabinet', 0.2),
+    ('Blinds', 0.2),
+    ('LaundryHamper', 0.2),
+    ('Safe', 0.2),
+    ('Microwave', 0.2),
+    ('Fridge', 0.2)])
 
 
 # mapping from classes to colors for segmentation
-CLASS_TO_COLOR = OrderedDict(
-    [("OccupiedSpace", (243, 246, 208))]
-    + list(PICKABLE_TO_COLOR.items())
-    + list(OPENABLE_TO_COLOR.items()))
+CLASS_TO_RATIO = OrderedDict(
+    [("OccupiedSpace", 0.2)]
+    + list(PICKABLE_TO_RATIO.items())
+    + list(OPENABLE_TO_RATIO.items()))
 
 
 # number of semantic segmentation classes we process
-NUM_CLASSES = len(CLASS_TO_COLOR)
+NUM_CLASSES = len(CLASS_TO_RATIO)
 
 
 def main():
@@ -86,12 +87,13 @@ def main():
     parser = argparse.ArgumentParser()
     parser.add_argument('--save_dir', type=str)
     parser.add_argument('--voxel_size', type=float, default=0.01)
+    parser.add_argument('--show', action='store_true')
     args = parser.parse_args()
 
     label_colour_map = label_colormap()
 
     files = glob.glob(os.path.join(args.save_dir, "*.pcd"))
-
+    files = [f for f in files if "object" not in f]
     files = sorted(files, key=lambda f: int(os.path.basename(f)[5:-4]))
 
     clouds = [open3d.io.read_point_cloud(f) for f in files]
@@ -108,15 +110,8 @@ def main():
         if object_id == 0:
             continue  # this is the background class
 
-        object_color = label_colour_map[object_id].astype(np.float32) / 255.0
-
-        num_points = np.asarray(c.colors).shape[0]
-
-        c.colors = open3d.utility.Vector3dVector(
-            np.tile(object_color, (num_points, 1)))
-
         labels = np.array(c.cluster_dbscan(
-            eps=2 * args.voxel_size, min_points=10))
+            eps=2 * args.voxel_size, min_points=0))
 
         indices = np.nonzero(labels >= 0)
 
@@ -132,17 +127,16 @@ def main():
                 np.asarray(c.points)[indices_l])
 
             aabb = pcdi.get_axis_aligned_bounding_box()
-            aabb.color = (1, 0, 0)  # Red
+            aabb.color = (1, 0, 0)
 
             bboxes.append(aabb)
-
-            print(list(CLASS_TO_SIZE.keys())[object_id],
-                  indices_l[0].size)
 
             class_to_max_size[object_id] = max(
                 class_to_max_size[object_id], indices_l[0].size)
 
             class_to_detections[object_id].append((pcdi, aabb))
+
+    class_to_bounding_boxes = {k: [] for k in class_to_detections.keys()}
 
     for object_id, detections in class_to_detections.items():
 
@@ -150,13 +144,34 @@ def main():
 
         for pcdi, aabb in detections:
 
+            min_size_ratio = list(CLASS_TO_RATIO.values())[object_id]
+
             if (np.asarray(pcdi.colors).shape[0] >
-                    class_to_max_size[object_id] * 0.2):
+                    class_to_max_size[object_id] * min_size_ratio):
+
+                num_instances = len(class_to_detections[object_id])
+
+                open3d.io.write_point_cloud(os.path.join(
+                    args.save_dir, f"class{object_id}_object{num_instances}.pcd"), pcdi)
 
                 class_to_detections[object_id].append((pcdi, aabb))
 
-    open3d.visualization.draw_geometries([
-        pi for k, v in class_to_detections.items() for vi in v for pi in vi])
+                class_to_bounding_boxes[object_id].append(np.concatenate([
+                    aabb.get_min_bound().reshape([3]),
+                    aabb.get_extent().reshape([3])], axis=0))
+
+    for key, value in class_to_bounding_boxes.items():
+        class_to_bounding_boxes[key] = np.stack(value, axis=0)
+
+    with open(os.path.join(
+            args.save_dir, "detections.pkl"), "wb") as f:
+        pkl.dump(class_to_bounding_boxes, f)
+
+    if args.show:
+
+        open3d.visualization.draw_geometries([
+            pi for k, v in class_to_detections
+            .items() for vi in v for pi in vi])
 
 
 if __name__ == '__main__':

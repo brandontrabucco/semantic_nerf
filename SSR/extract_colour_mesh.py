@@ -118,12 +118,12 @@ def train():
     parser.add_argument('--gpu', type=str, default="0", help='GPU IDs.')
 
     parser.add_argument('--return_top_p_occupied_voxels', type=float, default=0.5)
-    parser.add_argument('--semantic_threshold', type=float, default=0.9)
+    parser.add_argument('--semantic_threshold', type=float, default=0.6)
 
     parser.add_argument('--voxel_size', type=float, default=0.01)
 
-    parser.add_argument('--nb_neighbors', type=float, default=20)
-    parser.add_argument('--std_ratio', type=float, default=1.)
+    parser.add_argument('--nb_neighbors', type=float, default=50)
+    parser.add_argument('--std_ratio', type=float, default=2.)
 
     args = parser.parse_args()
 
